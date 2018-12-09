@@ -2,5 +2,16 @@
   "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentParameters.json#",
   "contentVersion": "1.0.0.0",
   "parameters": {
+    "alias": {
+      "value": "praro"
+    },
+    "adminpassword": {
+      "reference": {
+        "keyVault": {
+          "id": "/subscriptions/7b8adfasfd-d83e-46f5-b95c-17eadffdgse/resourceGroups/a-keyvault-rg/providers/Microsoft.KeyVault/vaults/a-akeyvault"
+        },
+        "secretName": "adminpassword"
+      }
+    }
   }
 }

@@ -1,8 +1,493 @@
 {
   "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
   "contentVersion": "1.0.0.0",
-  "parameters": {},
-  "variables": {},
-  "resources": [],
-  "outputs": {}
+  "parameters": {
+    "alias": {
+      "type": "string",
+      "metadata": {
+        "description": "Enter Your Microsoft Alias"
+      }
+    },
+    "adminusername": {
+      "type": "string",
+      "defaultValue": "azure-admin",
+      "metadata": {
+        "description": "Enter Username for Virtual Machines"
+      }
+    },
+    "adminpassword": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Enter Admin Passwords for Virtual Machines"
+      }
+    }
+
+  },
+
+  "variables": {
+
+    "vNet1": {
+      "name": "[Concat(parameters('alias'),'-hub-vnet1')]",
+      "addressSpacePrefix": "10.10.0.0/16",
+      "subnet1Name": "AzureFirewallSubnet",
+      "subnet1Prefix": "10.10.1.0/24",
+      "subnet2Name": "DMZ",
+      "subnet2Prefix": "10.10.2.0/24",
+      "subnet3Name": "Management",
+      "subnet3Prefix": "10.10.3.0/24",
+      "gatewaySubnetPrefix": "10.10.4.0/27",
+      "gatewayName": "[concat(parameters('alias'),'-vnet1-GW')]",
+      "gatewayPublicIPName": "[concat(parameters('alias'),'-vnet1-GWIP')]",
+      "asn": 65031,
+      "location": "East US"
+    },
+
+    "vNet2": {
+      "name": "[Concat(parameters('alias'),'-spoke-vnet2')]",
+      "env": "DR",
+      "addressSpacePrefix": "10.20.0.0/16",
+      "subnet1Name": "DMZ",
+      "subnet1Prefix": "10.20.1.0/24",
+      "subnet2Name": "Web",
+      "subnet2Prefix": "10.20.2.0/24",
+      "subnet3Name": "App",
+      "subnet3Prefix": "10.20.3.0/24",
+      "subnet4Name": "Data",
+      "subnet4Prefix": "10.20.4.0/24",
+      "subnet5Name": "Identity",
+      "subnet5Prefix": "10.20.5.0/24",
+      "subnet6Name": "Management",
+      "subnet6Prefix": "10.20.6.0/24",
+      "gatewaySubnetPrefix": "10.20.7.0/27",
+      "gatewayName": "[concat(parameters('alias'),'-vnet2-GW')]",
+      "gatewayPublicIPName": "[concat(parameters('alias'),'-vnet2-GWIP')]",
+      "asn": 65032,
+      "location": "East US"
+    },
+
+    "vNet3": {
+      "name": "[Concat(parameters('alias'),'-spoke-vnet3')]",
+      "env": "TEST",
+      "addressSpacePrefix": "10.30.0.0/16",
+      "subnet1Name": "DMZ",
+      "subnet1Prefix": "10.30.1.0/24",
+      "subnet2Name": "Web",
+      "subnet2Prefix": "10.30.2.0/24",
+      "subnet3Name": "App",
+      "subnet3Prefix": "10.30.3.0/24",
+      "subnet4Name": "Data",
+      "subnet4Prefix": "10.30.4.0/24",
+      "subnet5Name": "Identity",
+      "subnet5Prefix": "10.30.5.0/24",
+      "subnet6Name": "Management",
+      "subnet6Prefix": "10.30.6.0/24",
+      "gatewaySubnetPrefix": "10.30.7.0/27",
+      "gatewayName": "[concat(parameters('alias'),'-vnet3-GW')]",
+      "gatewayPublicIPName": "[concat(parameters('alias'),'-vnet3-GWIP')]",
+      "asn": 65033,
+      "location": "East US"
+    },
+
+
+    "jumpvm": {
+      "name": "[concat(parameters('alias'),'-jump0')]",
+      "size": "Standard_D1_v2",
+      "location": "East US",
+      "storagetype": "Standard_LRS",
+      "avname": "[concat(parameters('alias'),'-jumpavset')]",
+      "storageaccount": "[concat(parameters('alias'),take(uniqueString(resourceGroup().id),4),'sta')]",
+      "iparray": [ "10.10.3.4" ],
+      "imagePublisher": "MicrosoftWindowsServer",
+      "imageOffer": "WindowsServer",
+      "imagesku": "2016-Datacenter",
+      "datadisk1size": "100"
+
+    },
+    "dbvm": {
+      "name": "[concat(parameters('alias'),'-db0')]",
+      "size": "Standard_D1_v2",
+      "location": "East US",
+      "storagetype": "Standard_LRS",
+      "avname": "[concat(parameters('alias'),'-dbavset')]",
+      "storageaccount": "[concat(parameters('alias'),take(uniqueString(resourceGroup().id),4),'sta')]",
+      "iparray": [ "10.20.4.4" ],
+      "imagePublisher": "MicrosoftWindowsServer",
+      "imageOffer": "WindowsServer",
+      "imagesku": "2016-Datacenter",
+      "datadisk1size": "100"
+
+    },
+
+
+
+    "vnet1rg": "[concat(parameters('alias'),'-network-rg')]",
+
+    "vnet1Ref": "[resourceId(variables('vNet1rg'),'Microsoft.Network/virtualNetworks',variables('vNet1').name)]",
+    "jumpSubnetRef": "[concat(variables('vnet1Ref'),'/subnets/','Management')]",
+    "dbSubnetRef": "[concat(variables('vnet2Ref'),'/subnets/','DATA')]",
+    "vnet2Ref": "[resourceId('Microsoft.Network/virtualNetworks',variables('vNet2').name)]",
+    "gateway2SubnetRef": "[concat(variables('vnet2Ref'),'/subnets/','GatewaySubnet')]",
+    "gatewaySku": "Standard",
+    "sharedkey": "abc123",
+    "jumpboxrg": "[concat(parameters('alias'),'-jumpbox-rg')]",
+    "clientRootCertData": "MIIC5zCCAc+gAwIBAgIQY8vUyqs7xqdF2n6dIIXoMDANBgkqhkiG9w0BAQsFADAWMRQwEgYDVQQDDAtQMlNSb290Q2VydDAeFw0xNzA2MTExNjI3MjhaFw0xODA2MTExNjQ3MjhaMBYxFDASBgNVBAMMC1AyU1Jvb3RDZXJ0MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEApYsMmCcc1LXOTttt78wPjLYdktroNzwtT0sggyoCobaDcnHvx0JTtO8qPaKL9lnZOFognvZh43AdI+D/6v2x2jQ6NvzQOEQeH/CaAGFqOq6g9182irk9P/AxMoBz11Sq3xw/Ftjt4ltOzjdPOgf7+gzjDFrKVTAwVwJLjo3M6oKo4UTgamhhmzcj7nsTdCKhJtzR6qd+bUaMrupy0JpY9HpfcUKfRsoMJyrlznMYnEPYd59mBpvvFeECH0mhlyRTFHIVtg/d6QOroY6f8rG02q7VYSeIiqKlKJeN9GhPOGJSQvbFSA7OJN0DI6xy2+EhaVwJWx2oQ8tq+cxjUnSBYwIDAQABozEwLzAOBgNVHQ8BAf8EBAMCAgQwHQYDVR0OBBYEFGJiMSQO7ViEhXMpwRRIfiKpU108MA0GCSqGSIb3DQEBCwUAA4IBAQAXIoZbpIjGMlgFUwA74Uf/csDxTg8Ko2d0csgXXriMiMo3jYRgEZaXvExZM8hHX6HnbEtbvoqIHc15xb+DJmzXRD1fa387OLvooDhxH04KalomMk0KiyD6xRodynW+pCVpdEyC9QIOOYwTHHbK2+Ksci982ARu9GauV7Hwz9n9O6YbQ1Y8s7NeMhJMe0kVBs+u5BcyOBgfsKvA/gosf08BZIMGTO7uCWfBnJcNqFCErZ6XuMSuDtGdvl/ajkCptXG1ofU5lRNwCKosYiRQkUmPJt+bpxofNQLXoABg1Zz8rZHbpmY5yTDH13GJCBGK8aABiuo7K0Wwe/llffZPN6H6",
+    "jumpboxurl": "https://msreadylabcontent.blob.core.windows.net/task2/jumpbox.json",
+    "nextHopIP": "10.10.1.4",
+    "azfwRouteTableName": "[Concat(parameters('alias'),'-azroutetable')]",
+    "firewallName": "[Concat(parameters('alias'),'-azfw')]",
+    "publicIPName": "[Concat(parameters('alias'),'-azfw-pip')]",
+    "azureFirewallSubnetId": "[concat(variables('vnet1Ref'),'/subnets/','AzureFirewallSubnet')]",
+    "azureFirewallPublicIpId": "[resourceId('Microsoft.Network/publicIPAddresses',variables('publicIPName'))]"
+
+
+
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Network/routeTables",
+      "name": "[variables('azfwRouteTableName')]",
+      "apiVersion": "2018-02-01",
+      "location": "[variables('vNet1').location]",
+      "properties": {
+        "disableBgpRoutePropagation": false,
+        "routes": [
+          {
+            "name": "AzfwDefaultRoute",
+            "properties": {
+              "addressPrefix": "0.0.0.0/0",
+              "nextHopType": "VirtualAppliance",
+              "nextHopIpAddress": "[variables('nextHopIP')]"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "2018-06-01",
+      "type": "Microsoft.Network/azureFirewalls",
+      "name": "[variables('firewallName')]",
+      "location": "[variables('vNet1').location]",
+      "dependsOn": [
+
+        "[concat('Microsoft.Network/publicIPAddresses/', variables('publicIPName'))]"
+      ],
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "IpConf",
+            "properties": {
+              "subnet": {
+                "id": "[variables('azureFirewallSubnetId')]"
+              },
+              "InternalPublicIPAddress": {
+                "id": "[variables('azureFirewallPublicIpId')]"
+              }
+            }
+          }
+        ],
+        "applicationRuleCollections": [
+          {
+            "name": "appRc1",
+            "properties": {
+              "priority": 101,
+              "action": { "type": "Allow" },
+              "rules": [
+                {
+                  "name": "appRule1",
+                  "protocols": [
+                    {
+                      "port": "80",
+                      "protocolType": "http"
+                    },
+                    {
+                      "port": "443",
+                      "protocolType": "https"
+                    }
+                  ],
+                  "targetUrls": [ "*github.com" ]
+                }
+              ]
+            }
+          }
+        ],
+        "networkRuleCollections": [
+          {
+            "name": "netRc1",
+            "properties": {
+              "priority": 200,
+              "action": { "type": "Allow" },
+              "rules": [
+                {
+                  "name": "netRule1",
+                  "protocols": [ "TCP" ],
+                  "sourceAddresses": [ "192.168.2.0/24" ],
+                  "destinationAddresses": [ "*" ],
+                  "destinationPorts": [ "8000-8999" ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "2017-10-01",
+      "type": "Microsoft.Network/publicIPAddresses",
+      "name": "[variables('publicIPName')]",
+      "location": "[variables('vNet1').location]",
+      "sku": {
+        "name": "Standard"
+      },
+      "properties": {
+        "publicIPAllocationMethod": "Static",
+        "publicIPAddressVersion": "IPv4"
+      }
+    },
+    {
+      "apiVersion": "2016-04-30-preview",
+      "type": "Microsoft.Compute/virtualMachines",
+      "name": "[concat(variables('jumpvm').name,copyIndex(1))]",
+      "location": "[variables('jumpvm').location]",
+      "copy": {
+        "name": "jumpvmLoop",
+        "count": 1
+      },
+      "tags": {
+
+      },
+
+      "dependsOn": [
+
+        "jumpnicloop",
+
+        "[resourceId('Microsoft.Compute/availabilitysets', variables('jumpvm').avname)]"
+      ],
+      "properties": {
+        "availabilitySet": {
+          "id": "[resourceId('Microsoft.Compute/availabilitysets', variables('jumpvm').avname)]"
+
+        },
+
+        "hardwareProfile": {
+          "vmSize": "[variables('jumpvm').size]"
+        },
+        "osProfile": {
+          "computerName": "jumpbox",
+          "adminUsername": "[parameters('adminUsername')]",
+          "adminPassword": "[parameters('adminPassword')]"
+        },
+        "storageProfile": {
+          "imageReference": {
+            "publisher": "[variables('jumpvm').imagePublisher]",
+            "offer": "[variables('jumpvm').imageOffer]",
+            "sku": "[variables('jumpvm').imagesku]",
+            "version": "latest"
+          },
+          "osDisk": {
+            "createOption": "FromImage",
+            "managedDisk": {
+              "storageAccountType": "Standard_LRS"
+            }
+          }
+        },
+
+
+        "networkProfile": {
+          "networkInterfaces": [
+            {
+              "id": "[resourceId('Microsoft.Network/networkInterfaces',concat(variables('jumpvm').name,copyIndex(1),'-nic01'))]"
+            }
+          ]
+        }
+
+      },
+      "resources": [
+
+
+      ]
+
+    },
+    {
+      "apiVersion": "2016-03-30",
+      "type": "Microsoft.Network/networkInterfaces",
+      "name": "[concat(concat(variables('jumpvm').name,copyIndex(1),'-nic01'))]",
+      "location": "[variables('jumpvm').location]",
+      "tags": {
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/publicIPAddresses/', concat(variables('jumpvm').name,'-nic01-pip01'))]"
+
+
+      ],
+      "copy": {
+        "name": "jumpnicLoop",
+        "count": 1
+      },
+
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "ipconfig1",
+            "properties": {
+              "privateIPAllocationMethod": "Static",
+              "privateIPAddress": "[variables('jumpvm').iparray[copyindex()]]",
+              "publicIPAddress": {
+                "id": "[resourceId('Microsoft.Network/publicIPAddresses', concat(concat(variables('jumpvm').name,'-nic01-pip01')))]"
+              },
+              "subnet": {
+                "id": "[variables('jumpSubnetRef')]"
+              }
+
+
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "2017-03-30",
+      "type": "Microsoft.Compute/availabilitySets",
+      "name": "[variables('jumpvm').avname]",
+      "location": "[variables('jumpvm').location]",
+      "sku": {
+        "name": "Aligned"
+      },
+
+      "properties": {
+        "platformFaultDomainCount": 3,
+        "platformUpdateDomainCount": 3
+      }
+    },
+
+    {
+      "apiVersion": "2016-04-30-preview",
+      "type": "Microsoft.Compute/virtualMachines",
+      "name": "[concat(variables('dbvm').name,copyIndex(1))]",
+      "location": "[variables('dbvm').location]",
+      "copy": {
+        "name": "dbvmLoop",
+        "count": 1
+      },
+      "tags": {
+
+      },
+
+      "dependsOn": [
+
+        "dbnicloop",
+
+        "[resourceId('Microsoft.Compute/availabilitysets', variables('dbvm').avname)]"
+      ],
+      "properties": {
+        "availabilitySet": {
+          "id": "[resourceId('Microsoft.Compute/availabilitysets', variables('dbvm').avname)]"
+
+        },
+
+        "hardwareProfile": {
+          "vmSize": "[variables('dbvm').size]"
+        },
+        "osProfile": {
+          "computerName": "dbvm",
+          "adminUsername": "[parameters('adminUsername')]",
+          "adminPassword": "[parameters('adminPassword')]"
+        },
+        "storageProfile": {
+          "imageReference": {
+            "publisher": "[variables('dbvm').imagePublisher]",
+            "offer": "[variables('dbvm').imageOffer]",
+            "sku": "[variables('dbvm').imagesku]",
+            "version": "latest"
+          },
+          "osDisk": {
+            "createOption": "FromImage",
+            "managedDisk": {
+              "storageAccountType": "Standard_LRS"
+            }
+          }
+        },
+
+
+        "networkProfile": {
+          "networkInterfaces": [
+            {
+              "id": "[resourceId('Microsoft.Network/networkInterfaces',concat(variables('dbvm').name,copyIndex(1),'-nic01'))]"
+            }
+          ]
+        }
+
+      },
+      "resources": [
+
+        
+      ]
+
+    },
+    {
+      "apiVersion": "2016-03-30",
+      "type": "Microsoft.Network/networkInterfaces",
+      "name": "[concat(concat(variables('dbvm').name,copyIndex(1),'-nic01'))]",
+      "location": "[variables('dbvm').location]",
+      "tags": {
+      },
+      "dependsOn": [
+
+
+      ],
+      "copy": {
+        "name": "dbnicLoop",
+        "count": 1
+      },
+
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "ipconfig1",
+            "properties": {
+              "privateIPAllocationMethod": "Static",
+              "privateIPAddress": "[variables('dbvm').iparray[copyindex()]]",
+              "subnet": {
+                "id": "[variables('dbSubnetRef')]"
+              }
+
+
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "2017-03-30",
+      "type": "Microsoft.Compute/availabilitySets",
+      "name": "[variables('dbvm').avname]",
+      "location": "[variables('dbvm').location]",
+      "sku": {
+        "name": "Aligned"
+      },
+
+      "properties": {
+        "platformFaultDomainCount": 3,
+        "platformUpdateDomainCount": 3
+      }
+    },
+    {
+      "apiVersion": "2016-03-30",
+      "type": "Microsoft.Network/publicIPAddresses",
+      "name": "[concat(variables('jumpvm').name,'-nic01-pip01')]",
+      "location": "[variables('jumpvm').location]",
+      "tags": {
+
+      },
+      "properties": {
+        "publicIPAllocationMethod": "Dynamic",
+        "dnsSettings": {
+          "domainNameLabel": "[concat(variables('jumpvm').name,'rdpendpoint')]"
+        }
+      }
+    }
+    
+  ],
+
+  "outputs": {
+  }
 }
